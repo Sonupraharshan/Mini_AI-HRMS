@@ -125,11 +125,13 @@ export const smartAssign = async (req, res) => {
 
 export const smartAssignDraft = async (req, res) => {
   try {
-    const { title, description, complexityScore } = req.body;
+    const { title, description, complexityScore, rosterId } = req.body;
     const { orgId } = req.user;
 
+    const filter = rosterId ? { orgId, rosterId } : { orgId };
+    
     const employees = await prisma.employee.findMany({
-      where: { orgId }
+      where: filter
     });
 
     if (employees.length === 0) {

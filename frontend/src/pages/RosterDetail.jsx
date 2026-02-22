@@ -9,6 +9,8 @@ const RosterDetail = () => {
   const [roster, setRoster] = useState(null);
   const [empForm, setEmpForm] = useState({ name: '', email: '', password: '', role: 'EMPLOYEE', department: '' });
   const [taskForm, setTaskForm] = useState({ title: '', description: '', assigneeId: '', complexityScore: 1 });
+  const [aiRecommendation, setAiRecommendation] = useState(null);
+  const [loadingAI, setLoadingAI] = useState(false);
 
   const fetchRoster = async () => {
     try {
@@ -39,10 +41,31 @@ const RosterDetail = () => {
     try {
       await api.post('/tasks', { ...taskForm, complexityScore: parseInt(taskForm.complexityScore), rosterId: id });
       setTaskForm({ title: '', description: '', assigneeId: '', complexityScore: 1 });
+      setAiRecommendation(null);
       fetchRoster();
     } catch (err) {
       alert('Error creating task');
     }
+  };
+
+  const handleSmartAssign = async () => {
+    if (!taskForm.title || !taskForm.description) {
+      alert("Please provide a title and description first for the AI to analyze.");
+      return;
+    }
+    setLoadingAI(true);
+    setAiRecommendation(null);
+    try {
+      const res = await api.post('/ai/smart-assign-draft', { title: taskForm.title, description: taskForm.description, complexityScore: taskForm.complexityScore, rosterId: id });
+      setAiRecommendation(res.data.recommendation);
+      if (res.data.recommendation?.recommendedEmployeeId) {
+        setTaskForm(prev => ({ ...prev, assigneeId: res.data.recommendation.recommendedEmployeeId }));
+      }
+    } catch (err) {
+      console.error(err);
+      alert(err.response?.data?.error || "AI assignment failed.");
+    }
+    setLoadingAI(false);
   };
 
   if (user?.role !== 'ADMIN') {
@@ -104,15 +127,9 @@ const RosterDetail = () => {
           )}
 
           <h4 className="font-bold border-b pb-2 mb-4">Current Members</h4>
-          <div className="space-y-2 max-h-60 overflow-y-auto">
+          <div className="space-y-4 max-h-80 overflow-y-auto">
             {roster.employees.length === 0 ? <p className="text-gray-400 italic">No employees yet</p> : roster.employees.map(emp => (
-              <div key={emp.id} className="p-2 border rounded flex justify-between items-center">
-                <div>
-                  <span className="font-semibold">{emp.name}</span>
-                  {emp.status === 'PENDING' && <span className="ml-2 px-2 py-0.5 text-[10px] bg-yellow-100 text-yellow-800 rounded-full font-bold">PENDING</span>}
-                </div>
-                <span className="text-sm text-gray-500">{emp.email}</span>
-              </div>
+              <EmployeeListItem key={emp.id} emp={emp} />
             ))}
           </div>
         </div>
@@ -134,7 +151,18 @@ const RosterDetail = () => {
                   <input type="number" min="1" max="10" placeholder="Score 1-10" value={taskForm.complexityScore} onChange={e => setTaskForm({...taskForm, complexityScore: e.target.value})} className="w-24 p-2 border rounded" />
                 </div>
                 
-                <button type="submit" className="bg-green-600 text-white p-2 rounded w-full">Assign Task</button>
+                <div className="flex gap-2">
+                  <button type="button" onClick={handleSmartAssign} disabled={loadingAI} className="bg-purple-600 hover:bg-purple-700 text-white p-2 rounded flex-1 flex justify-center items-center gap-2 disabled:opacity-50">
+                    {loadingAI ? 'Analyzing...' : '✨ AI Smart Assign'}
+                  </button>
+                  <button type="submit" className="bg-green-600 hover:bg-green-700 text-white p-2 rounded flex-1">Create Task</button>
+                </div>
+
+                {aiRecommendation && (
+                  <div className="mt-2 text-sm bg-purple-50 text-purple-800 p-3 rounded border border-purple-200">
+                    <strong>AI Recommendation:</strong> {aiRecommendation.reason}
+                  </div>
+                )}
               </form>
             </>
           )}
@@ -156,6 +184,52 @@ const RosterDetail = () => {
         </div>
 
       </div>
+    </div>
+  );
+};
+
+const EmployeeListItem = ({ emp }) => {
+  const [scoreData, setScoreData] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  const handleEvaluate = async () => {
+    setLoading(true);
+    try {
+      const res = await api.get(`/ai/productivity/${emp.id}`);
+      setScoreData(res.data.productivity);
+    } catch (err) {
+      alert(err.response?.data?.error || "Error generating productivity score.");
+    }
+    setLoading(false);
+  };
+
+  return (
+    <div className="p-3 border rounded shadow-sm bg-gray-50 flex flex-col gap-2">
+      <div className="flex justify-between items-start">
+        <div>
+          <span className="font-bold text-gray-800">{emp.name}</span>
+          {emp.status === 'PENDING' && <span className="ml-2 px-2 py-0.5 text-[10px] bg-yellow-100 text-yellow-800 rounded-full font-bold">PENDING</span>}
+          <div className="text-xs text-gray-500">{emp.role} • {emp.department}</div>
+          <div className="text-xs text-blue-600">{emp.email}</div>
+        </div>
+        <div className="text-right">
+          {!scoreData && (
+             <button onClick={handleEvaluate} disabled={loading} className="text-[11px] bg-purple-100 text-purple-700 px-2 py-1 rounded hover:bg-purple-200 transition-colors">
+              {loading ? 'Evaluating...' : '✨ Get Productivity'}
+            </button>
+          )}
+          {scoreData && (
+            <div className="text-right">
+              <div className="font-bold text-purple-800 text-xl">{scoreData.score}/100</div>
+            </div>
+          )}
+        </div>
+      </div>
+      {scoreData && (
+        <div className="text-xs text-gray-600 bg-purple-50 p-2 rounded italic">
+          "{scoreData.reason}"
+        </div>
+      )}
     </div>
   );
 };
