@@ -1,0 +1,78 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Organization {
+  id        String     @id @default(uuid())
+  name      String
+  createdAt DateTime   @default(now())
+  employees Employee[]
+  tasks     Task[]
+  rosters   Roster[]
+}
+
+model Roster {
+  id           String       @id @default(uuid())
+  name         String
+  orgId        String
+  organization Organization @relation(fields: [orgId], references: [id])
+  adminId      String
+  admin        Employee     @relation("AdminRosters", fields: [adminId], references: [id])
+  createdAt    DateTime     @default(now())
+  employees    Employee[]   @relation("EmployeeRoster")
+  tasks        Task[]
+}
+
+enum AccountStatus {
+  PENDING
+  ACTIVE
+}
+
+model Employee {
+  id           String       @id @default(uuid())
+  orgId        String
+  organization Organization @relation(fields: [orgId], references: [id])
+  name         String
+  email        String       @unique
+  passwordHash String
+  role         String
+  department   String
+  skills       String[]
+  walletAddress String?
+  smtpPassword  String?
+  rosterId     String?
+  roster       Roster?      @relation("EmployeeRoster", fields: [rosterId], references: [id])
+  managedRosters Roster[]   @relation("AdminRosters")
+  status       AccountStatus @default(PENDING)
+  inviteToken  String?
+  createdAt    DateTime     @default(now())
+  tasks        Task[]
+}
+
+enum TaskStatus {
+  ASSIGNED
+  IN_PROGRESS
+  COMPLETED
+}
+
+model Task {
+  id             String       @id @default(uuid())
+  orgId          String
+  organization   Organization @relation(fields: [orgId], references: [id])
+  rosterId       String?
+  roster         Roster?      @relation(fields: [rosterId], references: [id])
+  assigneeId     String?
+  assignee       Employee?    @relation(fields: [assigneeId], references: [id])
+  title          String
+  description    String
+  status         TaskStatus   @default(ASSIGNED)
+  complexityScore Int?
+  txHash         String?
+  createdAt      DateTime     @default(now())
+  completedAt    DateTime?
+}
