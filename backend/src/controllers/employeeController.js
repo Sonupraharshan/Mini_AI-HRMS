@@ -98,7 +98,7 @@ export const createEmployee = async (req, res) => {
       }
     });
 
-    const verifyLink = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/verify/${inviteToken}`;
+    const verifyLink = `${req.headers.origin || process.env.FRONTEND_URL || 'http://localhost:5173'}/verify/${inviteToken}`;
     
     const emailResult = await sendEmail(
       email,

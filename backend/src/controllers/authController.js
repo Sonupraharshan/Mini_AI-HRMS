@@ -47,7 +47,7 @@ export const registerOrgAndAdmin = async (req, res) => {
       return [org, newAdmin, newRoster];
     });
 
-    const verificationLink = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/verify/${inviteToken}`;
+    const verificationLink = `${req.headers.origin || process.env.FRONTEND_URL || 'http://localhost:5173'}/verify/${inviteToken}`;
 
     const emailResult = await sendEmail(
       adminEmail,
