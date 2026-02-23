@@ -7,7 +7,7 @@ const RosterDetail = () => {
   const { id } = useParams();
   const { user } = useContext(AuthContext);
   const [roster, setRoster] = useState(null);
-  const [empForm, setEmpForm] = useState({ name: '', email: '', password: '', role: 'EMPLOYEE', department: '' });
+  const [empForm, setEmpForm] = useState({ name: '', email: '', password: '', department: '' });
   const [taskForm, setTaskForm] = useState({ title: '', description: '', assigneeId: '', complexityScore: 1 });
   const [aiRecommendation, setAiRecommendation] = useState(null);
   const [loadingAI, setLoadingAI] = useState(false);
@@ -28,11 +28,28 @@ const RosterDetail = () => {
   const handleCreateEmployee = async (e) => {
     e.preventDefault();
     try {
-      await api.post('/employees', { ...empForm, rosterId: id });
-      setEmpForm({ name: '', email: '', password: '', role: 'EMPLOYEE', department: '' });
+      const res = await api.post('/employees', { ...empForm, rosterId: id });
+      setEmpForm({ name: '', email: '', password: '', department: '' });
       fetchRoster();
+      
+      const { message, previewUrl } = res.data;
+      if (previewUrl) {
+          window.open(previewUrl, '_blank');
+      } else {
+          alert(message);
+      }
     } catch (err) {
       alert(err.response?.data?.error || 'Error creating employee');
+    }
+  };
+
+  const handleRemoveEmployee = async (employeeId) => {
+    if (!window.confirm("Are you sure you want to remove this employee from the roster? This cannot be undone.")) return;
+    try {
+      await api.delete(`/employees/${employeeId}`);
+      fetchRoster();
+    } catch (err) {
+      alert(err.response?.data?.error || 'Error removing employee');
     }
   };
 
@@ -91,22 +108,13 @@ const RosterDetail = () => {
           {roster.adminId === user.id && (
             <>
               <h3 className="text-xl mb-4 font-bold text-gray-700">Add Employee to Roster</h3>
-              
-              {!user.hasSmtpPassword && (
-                <div className="mb-4 p-3 bg-yellow-100 border-l-4 border-yellow-500 text-yellow-800 text-sm rounded">
-                  <strong>Warning:</strong> Please <Link to="/settings" className="underline font-bold">configure your App Password</Link> to send email invitations.
-                </div>
-              )}
 
               <form onSubmit={handleCreateEmployee} className="grid gap-3 mb-8">
                 <input required type="text" placeholder="Name" value={empForm.name} onChange={e => setEmpForm({...empForm, name: e.target.value})} className="p-2 border rounded" />
                 <input required type="email" placeholder="Email" value={empForm.email} onChange={e => setEmpForm({...empForm, email: e.target.value})} className="p-2 border rounded" />
                 <input required type="password" placeholder="Password" value={empForm.password} onChange={e => setEmpForm({...empForm, password: e.target.value})} className="p-2 border rounded" />
                 <div className="flex gap-2">
-                  <select required value={empForm.role} onChange={e => setEmpForm({...empForm, role: e.target.value})} className="p-2 border rounded flex-1">
-                    <option value="EMPLOYEE">Employee</option>
-                    <option value="ADMIN">Admin</option>
-                  </select>
+
                   <select required value={empForm.department} onChange={e => setEmpForm({...empForm, department: e.target.value})} className="p-2 border rounded flex-1">
                     <option value="" disabled>Select Department</option>
                     <option value="Engineering">Engineering</option>
@@ -115,21 +123,27 @@ const RosterDetail = () => {
                     <option value="HR">HR</option>
                   </select>
                 </div>
-                <button 
-                   type="submit" 
-                   disabled={!user.hasSmtpPassword}
-                   className="bg-blue-600 text-white p-2 rounded w-full disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                   Hire Employee
-                </button>
+                <button type="submit" className="bg-blue-600 text-white p-2 rounded w-full">Hire Employee</button>
               </form>
             </>
           )}
 
           <h4 className="font-bold border-b pb-2 mb-4">Current Members</h4>
           <div className="space-y-4 max-h-80 overflow-y-auto">
-            {roster.employees.length === 0 ? <p className="text-gray-400 italic">No employees yet</p> : roster.employees.map(emp => (
-              <EmployeeListItem key={emp.id} emp={emp} />
+            {/* Display Admin First */}
+            <EmployeeListItem 
+              key={roster.adminId} 
+              emp={{
+                id: roster.adminId,
+                name: roster.admin.name,
+                email: roster.admin.email,
+                status: roster.admin.status,
+                role: 'ADMIN',
+                department: 'Management'
+              }} 
+            />
+            {roster.employees.map(emp => (
+              <EmployeeListItem key={emp.id} emp={emp} onRemove={handleRemoveEmployee} canRemove={user?.id === roster.adminId} />
             ))}
           </div>
         </div>
@@ -188,7 +202,7 @@ const RosterDetail = () => {
   );
 };
 
-const EmployeeListItem = ({ emp }) => {
+const EmployeeListItem = ({ emp, onRemove, canRemove }) => {
   const [scoreData, setScoreData] = useState(null);
   const [loading, setLoading] = useState(false);
 
@@ -209,11 +223,19 @@ const EmployeeListItem = ({ emp }) => {
         <div>
           <span className="font-bold text-gray-800">{emp.name}</span>
           {emp.status === 'PENDING' && <span className="ml-2 px-2 py-0.5 text-[10px] bg-yellow-100 text-yellow-800 rounded-full font-bold">PENDING</span>}
-          <div className="text-xs text-gray-500">{emp.role} • {emp.department}</div>
+          <div className="text-xs text-gray-500">
+             {emp.role === 'ADMIN' && <span className="font-bold text-blue-600 mr-1">Admin •</span>}
+             {emp.department}
+          </div>
           <div className="text-xs text-blue-600">{emp.email}</div>
         </div>
-        <div className="text-right">
-          {!scoreData && (
+        <div className="text-right flex flex-col items-end gap-2">
+          {emp.role !== 'ADMIN' && canRemove && (
+             <button onClick={() => onRemove(emp.id)} className="text-[10px] bg-red-100 text-red-700 font-semibold px-2 py-1 rounded hover:bg-red-200 transition-colors">
+               Remove
+             </button>
+          )}
+          {emp.role !== 'ADMIN' && !scoreData && (
              <button onClick={handleEvaluate} disabled={loading} className="text-[11px] bg-purple-100 text-purple-700 px-2 py-1 rounded hover:bg-purple-200 transition-colors">
               {loading ? 'Evaluating...' : '✨ Get Productivity'}
             </button>

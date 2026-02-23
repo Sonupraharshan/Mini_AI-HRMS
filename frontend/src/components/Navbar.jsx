@@ -11,7 +11,7 @@ const Navbar = () => {
   const links = [{ name: 'Dashboard', path: '/dashboard' }];
   if (user.role === 'ADMIN') {
     links.push({ name: 'Rosters', path: '/rosters' });
-    links.push({ name: 'Settings', path: '/settings' });
+    links.push({ name: 'Mails', path: '/mails' });
   } else {
     links.push({ name: 'Employees', path: '/employees' });
   }

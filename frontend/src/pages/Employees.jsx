@@ -5,7 +5,6 @@ import { AuthContext } from '../context/AuthContext';
 const Employees = () => {
   const { user } = useContext(AuthContext);
   const [employees, setEmployees] = useState([]);
-  const [formData, setFormData] = useState({ name: '', email: '', password: '', role: 'EMPLOYEE', department: '', skills: '' });
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -21,21 +20,7 @@ const Employees = () => {
     }
   };
 
-  const handleChange = (e) => setFormData({ ...formData, [e.target.name]: e.target.value });
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setLoading(true);
-    try {
-      const data = { ...formData, skills: formData.skills.split(',').map(s => s.trim()) };
-      await api.post('/employees', data);
-      setFormData({ name: '', email: '', password: '', role: 'EMPLOYEE', department: '', skills: '' });
-      fetchEmployees();
-    } catch (err) {
-      alert('Error creating employee');
-    }
-    setLoading(false);
-  };
 
   return (
     <div className="p-8">
@@ -49,7 +34,7 @@ const Employees = () => {
           <thead>
             <tr className="border-b">
               <th className="p-2">Name</th>
-              <th className="p-2">Role</th>
+              <th className="p-2">Roster</th>
               <th className="p-2">Department</th>
               <th className="p-2">Skills</th>
               <th className="p-2 text-right">AI Evaluation</th>
@@ -88,7 +73,7 @@ const EmployeeRow = ({ emp }) => {
         {emp.status === 'PENDING' && <span className="ml-2 px-2 py-0.5 text-[10px] bg-yellow-100 text-yellow-800 rounded-full font-bold">PENDING</span>}
         <br/><span className="text-xs text-gray-500">{emp.email}</span>
       </td>
-      <td className="p-2 align-top">{emp.role}</td>
+      <td className="p-2 align-top">{emp.roster?.name}</td>
       <td className="p-2 align-top">{emp.department}</td>
       <td className="p-2 align-top">{emp.skills?.join(', ')}</td>
       <td className="p-2 text-right align-top">

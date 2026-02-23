@@ -7,6 +7,7 @@ import taskRoutes from './routes/taskRoutes.js';
 import aiRoutes from './routes/aiRoutes.js';
 import dashboardRoutes from './routes/dashboardRoutes.js';
 import rosterRoutes from './routes/rosterRoutes.js';
+import mailRoutes from './routes/mailRoutes.js';
 
 dotenv.config();
 
@@ -21,6 +22,7 @@ app.use('/api/tasks', taskRoutes);
 app.use('/api/ai', aiRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/rosters', rosterRoutes);
+app.use('/api/mails', mailRoutes);
 
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', message: 'Mini AI-HRMS API is running' });

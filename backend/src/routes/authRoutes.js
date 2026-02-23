@@ -1,5 +1,5 @@
 import express from 'express';
-import { registerOrgAndAdmin, login, me, verifyAccount, updateSmtpPassword } from '../controllers/authController.js';
+import { registerOrgAndAdmin, login, me, verifyAccount } from '../controllers/authController.js';
 import { authenticateToken } from '../middlewares/authMiddleware.js';
 
 const router = express.Router();
@@ -7,7 +7,6 @@ const router = express.Router();
 router.post('/register', registerOrgAndAdmin);
 router.post('/login', login);
 router.get('/me', authenticateToken, me);
-router.put('/smtp', authenticateToken, updateSmtpPassword);
 router.get('/verify/:token', verifyAccount);
 
 export default router;

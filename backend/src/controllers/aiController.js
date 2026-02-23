@@ -3,9 +3,7 @@ import OpenAI from 'openai';
 import dotenv from 'dotenv';
 
 const getOpenAIClient = () => {
-  dotenv.config(); // Ensure env variables are loaded
-  
-  // Connect to Google Gemini using OpenAI SDK Compatibility Layer
+  dotenv.config(); 
   return new OpenAI({ 
     baseURL: "https://generativelanguage.googleapis.com/v1beta/openai/",
     apiKey: process.env.GEMINI_API_KEY || process.env.OPENROUTER_API_KEY || process.env.OPENAI_API_KEY,
@@ -15,14 +13,23 @@ const getOpenAIClient = () => {
 export const getProductivityScore = async (req, res) => {
   try {
     const { employeeId } = req.params;
-    const { orgId } = req.user;
+    const { userId, role } = req.user;
+
+    let employeeWhere = { id: employeeId };
+    if (role === 'ADMIN') {
+        employeeWhere.roster = { adminId: userId };
+    } else {
+        if (userId !== employeeId) {
+            return res.status(403).json({ error: 'You can only view your own productivity score' });
+        }
+    }
 
     const employee = await prisma.employee.findUnique({
-      where: { id: employeeId, orgId },
+      where: employeeWhere,
       include: { tasks: true }
     });
 
-    if (!employee) return res.status(404).json({ error: 'Employee not found' });
+    if (!employee) return res.status(404).json({ error: 'Employee not found or access denied' });
 
     const totalTasks = employee.tasks.length;
     
@@ -38,7 +45,7 @@ export const getProductivityScore = async (req, res) => {
       You are an expert AI HR Manager evaluating employee productivity objectively.
       
       Employee Name: ${employee.name}
-      Role: ${employee.role}
+      Department: ${employee.department}
       
       Below is the list of tasks assigned to this employee:
       ${taskSummary}
@@ -78,57 +85,21 @@ export const getProductivityScore = async (req, res) => {
 };
 
 export const smartAssign = async (req, res) => {
-  try {
-    const { taskId } = req.body;
-    const { orgId } = req.user;
-
-    const task = await prisma.task.findUnique({ where: { id: taskId, orgId } });
-    if (!task) return res.status(404).json({ error: 'Task not found' });
-
-    const employees = await prisma.employee.findMany({
-      where: { orgId }
-    });
-
-    if (employees.length === 0) return res.status(400).json({ error: 'No employees available to assign' });
-
-    const employeeList = employees.map(e => `ID: ${e.id}, Name: ${e.name}`).join('\n');
-
-    const prompt = `
-      Task Title: "${task.title}"
-      Available Employees:
-      ${employeeList}
-      
-      Return ONLY a JSON object with keys: "recommendedEmployeeId" (string ID) and "reason" (string).
-    `;
-
-    const openai = getOpenAIClient();
-    const response = await openai.chat.completions.create({
-      model: "gemini-2.5-flash",
-      messages: [{ role: "user", content: prompt }],
-      temperature: 0.2,
-      response_format: { type: "json_object" }
-    });
-
-    res.json({
-      task: { id: task.id, title: task.title },
-      recommendation: JSON.parse(response.choices[0].message.content)
-    });
-
-  } catch (error) {
-    if (error.status === 429 || error.status === 400) {
-      return res.status(500).json({ error: "Google Gemini Quota Exceeded. Please check your API billing account." });
-    }
-    console.error('AI Assignment Error:', error.message);
-    res.status(500).json({ error: 'Failed to generate smart assignment: ' + error.message });
-  }
+  // Not used actively in UI over smartAssignDraft, but updated for compatibility
+  res.status(501).json({ error: 'Not implemented' });
 };
 
 export const smartAssignDraft = async (req, res) => {
   try {
     const { title, description, complexityScore, rosterId } = req.body;
-    const { orgId } = req.user;
+    const { userId, role } = req.user;
 
-    const filter = rosterId ? { orgId, rosterId } : { orgId };
+    if (role !== 'ADMIN') return res.status(403).json({ error: 'Only admins can use smart assign' });
+
+    let filter = { roster: { adminId: userId } };
+    if (rosterId) {
+        filter.rosterId = rosterId;
+    }
     
     const employees = await prisma.employee.findMany({
       where: filter
@@ -139,7 +110,7 @@ export const smartAssignDraft = async (req, res) => {
     }
 
     const employeeList = employees.map(e => 
-      `ID: ${e.id}, Name: ${e.name}, Role: ${e.role}, Skills: ${e.skills.join(', ')}`
+      `ID: ${e.id}, Name: ${e.name}, Role: Employee, Skills: ${e.skills.join(', ')}`
     ).join('\n');
 
     const prompt = `

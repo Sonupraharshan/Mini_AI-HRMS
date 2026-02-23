@@ -13,9 +13,16 @@ export const authenticateToken = (req, res, next) => {
     if (err) return res.status(403).json({ error: 'Invalid or expired token' });
     
     try {
-        const dbUser = await prisma.employee.findUnique({ where: { id: user.userId } });
-        if (!dbUser) return res.status(401).json({ error: 'User no longer exists' });
-        req.user = { ...user, rosterId: dbUser.rosterId };
+        let dbUser;
+        if (user.role === 'ADMIN') {
+             dbUser = await prisma.admin.findUnique({ where: { id: user.userId } });
+             if (!dbUser) return res.status(401).json({ error: 'Admin no longer exists' });
+             req.user = { ...user, orgId: dbUser.orgId };
+        } else {
+             dbUser = await prisma.employee.findUnique({ where: { id: user.userId } });
+             if (!dbUser) return res.status(401).json({ error: 'Employee no longer exists' });
+             req.user = { ...user, rosterId: dbUser.rosterId };
+        }
         next();
     } catch (e) {
         return res.status(500).json({ error: 'Database token verification failed' });

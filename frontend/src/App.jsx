@@ -7,8 +7,8 @@ import Employees from './pages/Employees';
 import Tasks from './pages/Tasks';
 import Rosters from './pages/Rosters';
 import RosterDetail from './pages/RosterDetail';
-import Settings from './pages/Settings';
 import Verify from './pages/Verify';
+import Mails from './pages/Mails';
 import Navbar from './components/Navbar';
 
 const ProtectedRoute = ({ children }) => {
@@ -38,7 +38,7 @@ function App() {
         <Route path="/tasks" element={<ProtectedRoute><Tasks /></ProtectedRoute>} />
         <Route path="/rosters" element={<ProtectedRoute><Rosters /></ProtectedRoute>} />
         <Route path="/rosters/:id" element={<ProtectedRoute><RosterDetail /></ProtectedRoute>} />
-        <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
+        <Route path="/mails" element={<ProtectedRoute><Mails /></ProtectedRoute>} />
         
         {/* Redirect root to dashboard */}
         <Route path="/" element={<Navigate to="/dashboard" />} />

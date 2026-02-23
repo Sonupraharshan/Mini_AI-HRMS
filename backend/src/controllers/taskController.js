@@ -2,28 +2,37 @@ import prisma from '../prismaClient.js';
 
 export const getTasks = async (req, res) => {
   try {
-    const { orgId, userId, role, rosterId } = req.user;
+    const { userId, role, rosterId } = req.user;
     const queryRosterId = req.query.rosterId;
     
-    // Admins see all tasks (or filter by query), employees see their roster's tasks
-    let whereClause = { orgId };
+    let whereClause = {};
     if (role === 'ADMIN') {
-        if (queryRosterId) whereClause.rosterId = queryRosterId;
+        whereClause.employee = { roster: { adminId: userId } };
+        if (queryRosterId) {
+            whereClause.employee.rosterId = queryRosterId;
+        }
     } else {
-        whereClause.rosterId = rosterId;
+        whereClause.employee = { rosterId };
     }
     
     const tasks = await prisma.task.findMany({
       where: whereClause,
       include: {
-        assignee: {
+        employee: {
           select: { name: true, email: true }
         }
       },
       orderBy: { createdAt: 'desc' }
     });
     
-    res.json(tasks);
+    // Map employee to assignee to maintain frontend compatibility
+    const mappedTasks = tasks.map(t => ({
+      ...t,
+      assigneeId: t.employeeId,
+      assignee: t.employee
+    }));
+
+    res.json(mappedTasks);
   } catch (error) {
     console.error('Error fetching tasks:', error);
     res.status(500).json({ error: 'Internal server error' });
@@ -32,26 +41,38 @@ export const getTasks = async (req, res) => {
 
 export const createTask = async (req, res) => {
   try {
-    const { orgId, userId } = req.user;
-    const { title, description, assigneeId, complexityScore, rosterId } = req.body;
+    const { userId, role } = req.user;
+    const { title, description, assigneeId, complexityScore } = req.body;
 
-    const roster = await prisma.roster.findUnique({ where: { id: rosterId } });
-    if (!roster || roster.adminId !== userId) {
-        return res.status(403).json({ error: 'Access Denied: Admins can only assign tasks to their own roster' });
+    if (role !== 'ADMIN') return res.status(403).json({ error: 'Only admins can create tasks' });
+    if (!assigneeId) return res.status(400).json({ error: 'assigneeId is required' });
+
+    const employee = await prisma.employee.findUnique({ 
+        where: { id: assigneeId },
+        include: { roster: true }
+    });
+
+    if (!employee || employee.roster.adminId !== userId) {
+        return res.status(403).json({ error: 'Access Denied: Admins can only assign tasks to employees within their own rosters' });
     }
 
     const task = await prisma.task.create({
       data: {
-        orgId,
         title,
         description,
-        assigneeId: assigneeId || null,
-        complexityScore: complexityScore || 1,
-        rosterId: rosterId || null
+        employeeId: assigneeId,
+        complexityScore: complexityScore || 1
+      },
+      include: {
+        employee: true
       }
     });
 
-    res.status(201).json({ message: 'Task created successfully', task });
+    // Map output for frontend
+    res.status(201).json({ 
+        message: 'Task created successfully', 
+        task: { ...task, assigneeId: task.employeeId, assignee: task.employee } 
+    });
   } catch (error) {
     console.error('Error creating task:', error);
     res.status(500).json({ error: 'Internal server error' });
@@ -70,12 +91,11 @@ export const updateTaskStatus = async (req, res) => {
       return res.status(404).json({ error: 'Task not found' });
     }
 
-    // Only task assignees can update the task status
     if (role === 'ADMIN') {
       return res.status(403).json({ error: 'Admins can assign tasks but cannot complete them. Only the assigned employee can update this task.' });
     }
     
-    if (task.assigneeId !== userId) {
+    if (task.employeeId !== userId) {
       return res.status(403).json({ error: 'Not authorized to update this task' });
     }
 

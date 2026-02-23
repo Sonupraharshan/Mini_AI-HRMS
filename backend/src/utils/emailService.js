@@ -1,23 +1,41 @@
 import nodemailer from 'nodemailer';
+import dotenv from 'dotenv';
 
-export const sendEmail = async (fromEmail, appPassword, toEmail, subject, htmlContent) => {
+dotenv.config();
+
+export const sendEmail = async (toEmail, subject, htmlContent, senderName, orgName, replyToEmail) => {
     try {
-        if (!appPassword) {
-           console.error(`[Email Service] Cannot send email. User ${fromEmail} does not have an SMTP App Password configured.`);
-           return { success: false, error: 'No SMTP App Password configured for sender.' };
+        const smtpUser = process.env.SMTP_USER;
+        const smtpPass = process.env.SMTP_PASS;
+        const smtpHost = process.env.SMTP_HOST || 'smtp-relay.brevo.com';
+        const smtpPort = parseInt(process.env.SMTP_PORT || '587');
+        const senderEmail = process.env.SENDER_EMAIL || smtpUser; 
+
+        if (!smtpPass || !smtpUser) {
+           console.error(`[Email Service] Cannot send email. SMTP_USER or SMTP_PASS missing in .env.`);
+           return { success: false, error: 'Server missing SMTP credentials.' };
         }
 
         const transporter = nodemailer.createTransport({
-            service: 'gmail', // Defaulting to Gmail as the most common provider
+            host: smtpHost,
+            port: smtpPort,
+            secure: smtpPort === 465, // true for 465, false for 587
             auth: {
-                user: fromEmail,
-                pass: appPassword
+                user: smtpUser,
+                pass: smtpPass
             }
         });
 
+        const fromString = senderName && replyToEmail
+            ? `"${senderName} (${replyToEmail}) via Mini AI-HRMS" <${senderEmail}>`
+            : senderName && orgName 
+                ? `"${senderName} at ${orgName}" <${senderEmail}>`
+                : `"Mini AI-HRMS" <${senderEmail}>`;
+
         const info = await transporter.sendMail({
-            from: `"Your Admin Team" <${fromEmail}>`,
+            from: fromString,
             to: toEmail,
+            replyTo: replyToEmail || undefined,
             subject: subject,
             html: htmlContent,
         });
@@ -26,6 +44,6 @@ export const sendEmail = async (fromEmail, appPassword, toEmail, subject, htmlCo
         return { success: true, messageId: info.messageId };
     } catch (error) {
         console.error("Failed to send real email:", error);
-        return { success: false, error };
+        return { success: false, error: error.message || error };
     }
 };

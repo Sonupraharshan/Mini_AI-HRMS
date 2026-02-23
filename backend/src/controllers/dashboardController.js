@@ -2,27 +2,35 @@ import prisma from '../prismaClient.js';
 
 export const getDashboardStats = async (req, res) => {
   try {
-    const { orgId, userId, role, rosterId } = req.user;
+    const { userId, role, rosterId } = req.user;
     const queryRosterId = req.query.rosterId;
 
-    let employeeQuery = { orgId };
-    let taskQuery = { orgId };
+    let totalEmployees = 0;
+    let taskList = [];
 
     if (role === 'ADMIN') {
+        let employeeQuery = { roster: { adminId: userId } };
+        let taskQuery = { employee: { roster: { adminId: userId } } };
+
         if (queryRosterId) {
             employeeQuery.rosterId = queryRosterId;
-            taskQuery.rosterId = queryRosterId;
+            taskQuery.employee = { rosterId: queryRosterId };
         }
-    } else {
-        employeeQuery.rosterId = rosterId;
-        taskQuery.assigneeId = userId;
-        taskQuery.rosterId = rosterId;
-    }
 
-    const [totalEmployees, taskList] = await Promise.all([
-      prisma.employee.count({ where: employeeQuery }),
-      prisma.task.findMany({ where: taskQuery })
-    ]);
+        const [empCount, tasks] = await Promise.all([
+            prisma.employee.count({ where: employeeQuery }),
+            prisma.task.findMany({ where: taskQuery })
+        ]);
+        totalEmployees = empCount;
+        taskList = tasks;
+    } else {
+        const [empCount, tasks] = await Promise.all([
+            prisma.employee.count({ where: { rosterId } }),
+            prisma.task.findMany({ where: { employeeId: userId } })
+        ]);
+        totalEmployees = empCount;
+        taskList = tasks;
+    }
 
     const assignedTasks = taskList.filter(t => t.status === 'ASSIGNED').length;
     const inProgressTasks = taskList.filter(t => t.status === 'IN_PROGRESS').length;

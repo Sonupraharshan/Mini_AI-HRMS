@@ -1,28 +1,37 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef, useContext } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import api from '../api';
+import { AuthContext } from '../context/AuthContext';
 
 const Verify = () => {
   const { token } = useParams();
   const navigate = useNavigate();
   const [status, setStatus] = useState('verifying');
   const [errorMsg, setErrorMsg] = useState('');
+  const called = useRef(false);
+  const { autoLogin } = useContext(AuthContext);
 
   useEffect(() => {
+    if (called.current) return;
+    called.current = true;
+
     const verifyToken = async () => {
       try {
-        await api.get(`/auth/verify/${token}`);
+        const res = await api.get(`/auth/verify/${token}`);
+        if (res.data.token && res.data.user) {
+           autoLogin(res.data.user, res.data.token);
+        }
         setStatus('success');
         setTimeout(() => {
-           navigate('/login');
-        }, 3000);
+           navigate('/dashboard');
+        }, 2000);
       } catch (err) {
         setStatus('error');
         setErrorMsg(err.response?.data?.error || 'Verification failed. The link might be invalid or expired.');
       }
     };
     verifyToken();
-  }, [token, navigate]);
+  }, [token, navigate, autoLogin]);
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-100">

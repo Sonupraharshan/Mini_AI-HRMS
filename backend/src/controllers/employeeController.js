@@ -5,17 +5,24 @@ import { sendEmail } from '../utils/emailService.js';
 
 export const getEmployees = async (req, res) => {
   try {
-    const { orgId, role, rosterId } = req.user;
+    const { role, userId, rosterId } = req.user;
     
-    // Admins can query any rosterId via req.query.rosterId, otherwise they see all org employees.
-    // Standard employees are securely locked to their token's rosterId.
-    let filter = { orgId };
+    let filter = {};
     
     if (role === 'ADMIN') {
         if (req.query.rosterId) {
+            // Verify admin owns the roster
+            const roster = await prisma.roster.findUnique({ where: { id: req.query.rosterId } });
+            if (!roster || roster.adminId !== userId) {
+                return res.status(403).json({ error: 'Not authorized for this roster' });
+            }
             filter.rosterId = req.query.rosterId;
+        } else {
+            // See all employees out of all rosters the admin owns
+            filter.roster = { adminId: userId };
         }
     } else {
+        // Standard employees see peers in their exact roster
         filter.rosterId = rosterId;
     }
     
@@ -25,11 +32,11 @@ export const getEmployees = async (req, res) => {
         id: true,
         name: true,
         email: true,
-        role: true,
         department: true,
         skills: true,
         walletAddress: true,
         rosterId: true,
+        status: true,
         roster: { select: { name: true } },
         createdAt: true
       }
@@ -43,23 +50,29 @@ export const getEmployees = async (req, res) => {
 
 export const createEmployee = async (req, res) => {
   try {
-    const { orgId, role: adminRole, userId } = req.user; 
+    const { role: adminRole, userId } = req.user; 
     
     if (adminRole !== 'ADMIN') return res.status(403).json({ error: 'Only admins can add employees' });
     
-    const { name, email, password, role, department, skills, walletAddress, rosterId } = req.body;
+    const { name, email, password, department, skills, walletAddress, rosterId } = req.body;
+
+    if (!rosterId) return res.status(400).json({ error: 'rosterId is required' });
+
+    const adminUser = await prisma.admin.findUnique({ 
+      where: { id: userId },
+      include: { organization: true }
+    });
 
     const roster = await prisma.roster.findUnique({ where: { id: rosterId } });
     if (!roster || roster.adminId !== userId) {
         return res.status(403).json({ error: 'Access Denied: Admins can only hire members to their own roster' });
     }
 
-    const existingUser = await prisma.employee.findUnique({
-      where: { email }
-    });
+    const existingAdmin = await prisma.admin.findUnique({ where: { email } });
+    const existingEmployee = await prisma.employee.findUnique({ where: { email } });
 
-    if (existingUser) {
-      return res.status(400).json({ error: 'Employee with this email already exists' });
+    if (existingAdmin || existingEmployee) {
+      return res.status(400).json({ error: 'Account with this email already exists' });
     }
 
     const passwordHash = await bcrypt.hash(password, 10);
@@ -67,15 +80,13 @@ export const createEmployee = async (req, res) => {
 
     const employee = await prisma.employee.create({
       data: {
-        orgId,
+        rosterId,
         name,
         email,
         passwordHash,
-        role: role || 'EMPLOYEE',
         department,
         skills: skills || [],
         walletAddress: walletAddress || null,
-        rosterId: rosterId || null,
         status: 'PENDING',
         inviteToken
       },
@@ -83,31 +94,46 @@ export const createEmployee = async (req, res) => {
         id: true,
         name: true,
         email: true,
-        role: true,
         department: true,
       }
     });
 
-    const adminUser = await prisma.employee.findUnique({ where: { id: userId } });
     const verifyLink = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/verify/${inviteToken}`;
     
-    // Fire off the welcome email!
-    await sendEmail(
-      adminUser.email,
-      adminUser.smtpPassword,
+    const emailResult = await sendEmail(
       email,
       'You are invited to join Mini AI-HRMS!',
-      `
-      <div style="font-family: Arial, sans-serif; padding: 20px;">
-        <h2>Welcome to Mini AI-HRMS!</h2>
-        <p><strong>${adminUser.name}</strong> has invited you to join their team as a <strong>${role || 'EMPLOYEE'}</strong>.</p>
+      `<div style="font-family: Arial, sans-serif; padding: 20px;">
+        <h2>Welcome to ${adminUser.organization?.name || 'Mini AI-HRMS'}!</h2>
+        <p><strong>${adminUser.name}</strong> has invited you to join the <strong>${roster.name}</strong> Roster.</p>
         <p>Please click the link below to accept the invitation and activate your account:</p>
         <a href="${verifyLink}" style="display:inline-block; padding: 10px 20px; color: white; background-color: #2563eb; text-decoration: none; border-radius: 5px;">Accept Invitation</a>
-      </div>
-      `
+        <br><br>
+        <p>Your temporary password is: <strong>${password}</strong></p>
+        <p><em>Please make sure to login and change your password as soon as possible.</em></p>
+      </div>`,
+      adminUser.name,
+      adminUser.organization?.name,
+      adminUser.email
     );
 
-    res.status(201).json({ message: 'Employee created successfully. Invitation sent!', employee });
+    await prisma.mail.create({
+      data: {
+        subject: 'You are invited to join Mini AI-HRMS!',
+        body: `Invitation sent to ${email} for roster ${roster.name}`,
+        type: 'INVITATION',
+        senderId: userId,
+        orgId: adminUser.orgId,
+        rosterId: rosterId,
+        recipientEmail: email
+      }
+    });
+
+    res.status(201).json({ 
+        message: 'Employee created successfully. Invitation sent!', 
+        employee,
+        previewUrl: emailResult.previewUrl
+    });
   } catch (error) {
     console.error('Error creating employee:', error);
     res.status(500).json({ error: 'Internal server error' });
@@ -132,6 +158,39 @@ export const updateWalletAddress = async (req, res) => {
     res.json({ message: 'Wallet address updated', employee });
   } catch (error) {
     console.error('Error updating wallet address:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
+export const deleteEmployee = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { role: adminRole, userId } = req.user;
+    
+    if (adminRole !== 'ADMIN') {
+        return res.status(403).json({ error: 'Only admins can delete employees' });
+    }
+
+    const employee = await prisma.employee.findUnique({
+      where: { id },
+      include: { roster: true }
+    });
+
+    if (!employee) {
+        return res.status(404).json({ error: 'Employee not found' });
+    }
+
+    if (employee.roster.adminId !== userId) {
+        return res.status(403).json({ error: 'Access Denied: You cannot delete employees outside your rosters.' });
+    }
+
+    await prisma.employee.delete({
+      where: { id }
+    });
+
+    res.json({ message: 'Employee successfully removed from the roster.' });
+  } catch (error) {
+    console.error('Error deleting employee:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 };

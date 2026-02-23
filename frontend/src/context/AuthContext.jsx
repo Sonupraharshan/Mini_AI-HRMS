@@ -42,12 +42,8 @@ export const AuthProvider = ({ children }) => {
   const registerAdmin = async (orgName, adminName, adminEmail, adminPassword) => {
     try {
       const response = await api.post('/auth/register', { orgName, adminName, adminEmail, adminPassword });
-      const { admin, token } = response.data;
-      
-      localStorage.setItem('token', token);
-      localStorage.setItem('user', JSON.stringify(admin));
-      setUser(admin);
-      return { success: true };
+      // The backend no longer logs them in immediately, it sends an email.
+      return { success: true, message: response.data.message, previewUrl: response.data.previewUrl };
     } catch (error) {
       return { success: false, error: error.response?.data?.error || 'Registration failed' };
     }
@@ -59,8 +55,14 @@ export const AuthProvider = ({ children }) => {
     setUser(null);
   };
 
+  const autoLogin = (userData, token) => {
+    localStorage.setItem('token', token);
+    localStorage.setItem('user', JSON.stringify(userData));
+    setUser(userData);
+  };
+
   return (
-    <AuthContext.Provider value={{ user, loading, login, registerAdmin, logout }}>
+    <AuthContext.Provider value={{ user, loading, login, registerAdmin, logout, autoLogin }}>
       {children}
     </AuthContext.Provider>
   );

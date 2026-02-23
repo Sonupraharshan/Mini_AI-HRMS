@@ -2,6 +2,7 @@ import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import prisma from '../prismaClient.js';
 import { sendEmail } from '../utils/emailService.js';
+import crypto from 'crypto';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'supersecretjwtkey_change_in_production';
 
@@ -9,64 +10,82 @@ export const registerOrgAndAdmin = async (req, res) => {
   try {
     const { orgName, adminName, adminEmail, adminPassword } = req.body;
 
-    // Check if employee/admin already exists
-    const existingUser = await prisma.employee.findUnique({
-      where: { email: adminEmail }
-    });
+    const existingAdmin = await prisma.admin.findUnique({ where: { email: adminEmail } });
+    const existingEmployee = await prisma.employee.findUnique({ where: { email: adminEmail } });
 
-    if (existingUser) {
+    if (existingAdmin || existingEmployee) {
       return res.status(400).json({ error: 'User with this email already exists' });
     }
 
-    // Hash password
     const passwordHash = await bcrypt.hash(adminPassword, 10);
 
-    // Create organization and admin inside a transaction
+    const inviteToken = crypto.randomBytes(32).toString('hex');
+
     const [organization, admin, roster] = await prisma.$transaction(async (tx) => {
       const org = await tx.organization.create({
         data: { name: orgName }
       });
 
-      const user = await tx.employee.create({
+      const newAdmin = await tx.admin.create({
         data: {
           orgId: org.id,
           name: adminName,
           email: adminEmail,
           passwordHash,
-          role: 'ADMIN',
-          department: 'Management',
-          skills: []
+          status: 'PENDING',
+          inviteToken
         }
       });
       
       const newRoster = await tx.roster.create({
         data: {
           name: 'Main Roster',
-          orgId: org.id,
-          adminId: user.id
+          adminId: newAdmin.id
         }
       });
       
-      await tx.employee.update({
-        where: { id: user.id },
-        data: { rosterId: newRoster.id }
-      });
-
-      return [org, user, newRoster];
+      return [org, newAdmin, newRoster];
     });
 
-    const token = jwt.sign({ userId: admin.id, orgId: organization.id, role: admin.role, rosterId: roster.id }, JWT_SECRET, { expiresIn: '1d' });
+    const verificationLink = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/verify/${inviteToken}`;
+
+    const emailResult = await sendEmail(
+      adminEmail,
+      'Welcome to Mini AI-HRMS! Please verify your email.',
+      `<div style="font-family: Arial, sans-serif; padding: 20px;">
+        <h2>Welcome to Mini AI-HRMS, ${adminName}!</h2>
+        <p>Your organization <strong>${orgName}</strong> has been successfully registered.</p>
+        <p>To finish setting up your Admin account, please verify your email address by clicking the link below:</p>
+        <a href="${verificationLink}" style="display:inline-block; padding:10px 20px; color:#fff; background-color:#1e3a8a; text-decoration:none; border-radius:5px;">Verify My Email</a>
+      </div>`,
+      'System Admin',
+      orgName,
+      process.env.SMTP_USER
+    );
+
+    await prisma.mail.create({
+      data: {
+        subject: 'Welcome to Mini AI-HRMS! Please verify your email.',
+        body: `Organization ${orgName} registered. Verification link sent to ${adminEmail}`,
+        type: 'INVITATION',
+        senderId: admin.id,
+        orgId: organization.id,
+        rosterId: roster.id,
+        recipientEmail: adminEmail
+      }
+    });
 
     res.status(201).json({
-      message: 'Organization and Admin registered successfully',
+      message: 'Organization registered successfully! Please check your email to verify your account.',
       organization,
       admin: {
         id: admin.id,
         name: admin.name,
         email: admin.email,
-        role: admin.role
+        role: 'ADMIN',
+        orgId: admin.orgId
       },
-      token
+      previewUrl: emailResult.previewUrl
     });
 
   } catch (error) {
@@ -79,9 +98,13 @@ export const login = async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    const user = await prisma.employee.findUnique({
-      where: { email }
-    });
+    let user = await prisma.admin.findUnique({ where: { email } });
+    let role = 'ADMIN';
+
+    if (!user) {
+      user = await prisma.employee.findUnique({ where: { email } });
+      role = 'EMPLOYEE';
+    }
 
     if (!user) {
       return res.status(401).json({ error: 'Invalid credentials' });
@@ -97,7 +120,11 @@ export const login = async (req, res) => {
       return res.status(403).json({ error: 'Your account is pending verification. Please check your email for the invitation link.' });
     }
 
-    const token = jwt.sign({ userId: user.id, orgId: user.orgId, role: user.role, rosterId: user.rosterId }, JWT_SECRET, { expiresIn: '1d' });
+    const tokenPayload = { userId: user.id, role };
+    if (role === 'ADMIN') tokenPayload.orgId = user.orgId;
+    if (role === 'EMPLOYEE') tokenPayload.rosterId = user.rosterId;
+
+    const token = jwt.sign(tokenPayload, JWT_SECRET, { expiresIn: '1d' });
 
     res.status(200).json({
       message: 'Login successful',
@@ -105,10 +132,8 @@ export const login = async (req, res) => {
         id: user.id,
         name: user.name,
         email: user.email,
-        role: user.role,
-        orgId: user.orgId,
-        rosterId: user.rosterId,
-        walletAddress: user.walletAddress
+        role,
+        ...(role === 'ADMIN' ? { orgId: user.orgId } : { rosterId: user.rosterId, walletAddress: user.walletAddress })
       },
       token
     });
@@ -121,9 +146,14 @@ export const login = async (req, res) => {
 
 export const me = async (req, res) => {
   try {
-    const user = await prisma.employee.findUnique({
-      where: { id: req.user.userId }
-    });
+    let user;
+    let role = req.user.role;
+
+    if (role === 'ADMIN') {
+      user = await prisma.admin.findUnique({ where: { id: req.user.userId } });
+    } else {
+      user = await prisma.employee.findUnique({ where: { id: req.user.userId } });
+    }
     
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
@@ -133,11 +163,8 @@ export const me = async (req, res) => {
       id: user.id,
       name: user.name,
       email: user.email,
-      role: user.role,
-      orgId: user.orgId,
-      rosterId: user.rosterId,
-      walletAddress: user.walletAddress,
-      hasSmtpPassword: !!user.smtpPassword
+      role,
+      ...(role === 'ADMIN' ? { orgId: user.orgId } : { rosterId: user.rosterId, walletAddress: user.walletAddress })
     });
   } catch (error) {
     console.error('Fetch Me Error:', error);
@@ -145,65 +172,72 @@ export const me = async (req, res) => {
   }
 };
 
-export const updateSmtpPassword = async (req, res) => {
-  try {
-    const userId = req.user.userId;
-    const { smtpPassword } = req.body;
-
-    if (!smtpPassword) {
-      return res.status(400).json({ error: 'SMTP Password is required' });
-    }
-
-    await prisma.employee.update({
-      where: { id: userId },
-      data: { smtpPassword }
-    });
-
-    res.json({ message: 'SMTP Password updated successfully' });
-  } catch (error) {
-    console.error('Update SMTP Password Error:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-};
-
 export const verifyAccount = async (req, res) => {
   try {
     const { token } = req.params;
-    const user = await prisma.employee.findFirst({ where: { inviteToken: token } });
+    let user = await prisma.admin.findFirst({ 
+      where: { inviteToken: token },
+      include: { organization: true }
+    });
+    let role = 'ADMIN';
+
+    if (!user) {
+      user = await prisma.employee.findFirst({ 
+        where: { inviteToken: token },
+        include: { roster: { include: { admin: { include: { organization: true } } } } }
+      });
+      role = 'EMPLOYEE';
+    }
 
     if (!user || user.status !== 'PENDING') {
       return res.status(400).json({ error: 'Invalid or expired verification token' });
     }
 
-    await prisma.employee.update({
-      where: { id: user.id },
-      data: { status: 'ACTIVE', inviteToken: null }
+    if (role === 'ADMIN') {
+      await prisma.admin.update({
+        where: { id: user.id },
+        data: { status: 'ACTIVE', inviteToken: null }
+      });
+      
+    } else {
+      await prisma.employee.update({
+        where: { id: user.id },
+        data: { status: 'ACTIVE', inviteToken: null }
+      });
+
+      const notifyingAdminEmail = user.roster?.admin?.email;
+      if (notifyingAdminEmail) {
+          await sendEmail(
+              notifyingAdminEmail, 
+              'Team Member Joined!',
+              `<div style="font-family: Arial, sans-serif; padding: 20px;">
+                <h2>Great news!</h2>
+                <p><strong>${user.name}</strong> has accepted their invitation and joined your roster.</p>
+              </div>`,
+              user.name,
+              null,
+              user.email
+          );
+      }
+    }
+
+    const tokenPayload = { userId: user.id, role };
+    if (role === 'ADMIN') tokenPayload.orgId = user.orgId;
+    if (role === 'EMPLOYEE') tokenPayload.rosterId = user.rosterId;
+
+    const tokenJwt = jwt.sign(tokenPayload, JWT_SECRET, { expiresIn: '1d' });
+
+    res.status(200).json({
+      message: 'Account verified successfully',
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role,
+        ...(role === 'ADMIN' ? { orgId: user.orgId } : { rosterId: user.rosterId, walletAddress: user.walletAddress })
+      },
+      token: tokenJwt
     });
-
-    let notifyingAdminEmail = null;
-    let notifyingAppPassword = null;
-    if (user.rosterId) {
-         const roster = await prisma.roster.findUnique({ where: { id: user.rosterId }, include: { admin: true } });
-         if (roster && roster.admin) {
-             notifyingAdminEmail = roster.admin.email;
-             notifyingAppPassword = roster.admin.smtpPassword;
-         }
-    }
-    
-    if (notifyingAdminEmail) {
-        await sendEmail(
-            notifyingAdminEmail, // Using admin email as the 'from' since it's the only one with credentials
-            notifyingAppPassword,
-            notifyingAdminEmail, // Sending to themselves
-            'Team Member Joined!',
-            `<div style="font-family: Arial, sans-serif; padding: 20px;">
-              <h2>Great news!</h2>
-              <p><strong>${user.name}</strong> has accepted their invitation and joined your roster.</p>
-            </div>`
-        );
-    }
-
-    res.json({ message: 'Account verified successfully' });
   } catch (error) {
     console.error('Verify error:', error);
     res.status(500).json({ error: 'Internal server error' });

@@ -11,21 +11,8 @@ model Organization {
   id        String     @id @default(uuid())
   name      String
   createdAt DateTime   @default(now())
-  employees Employee[]
-  tasks     Task[]
-  rosters   Roster[]
-}
-
-model Roster {
-  id           String       @id @default(uuid())
-  name         String
-  orgId        String
-  organization Organization @relation(fields: [orgId], references: [id])
-  adminId      String
-  admin        Employee     @relation("AdminRosters", fields: [adminId], references: [id])
-  createdAt    DateTime     @default(now())
-  employees    Employee[]   @relation("EmployeeRoster")
-  tasks        Task[]
+  admins    Admin[]
+  mails     Mail[]
 }
 
 enum AccountStatus {
@@ -33,25 +20,44 @@ enum AccountStatus {
   ACTIVE
 }
 
-model Employee {
+model Admin {
   id           String       @id @default(uuid())
   orgId        String
-  organization Organization @relation(fields: [orgId], references: [id])
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
   name         String
   email        String       @unique
   passwordHash String
-  role         String
-  department   String
-  skills       String[]
-  walletAddress String?
-  smtpPassword  String?
-  rosterId     String?
-  roster       Roster?      @relation("EmployeeRoster", fields: [rosterId], references: [id])
-  managedRosters Roster[]   @relation("AdminRosters")
   status       AccountStatus @default(PENDING)
   inviteToken  String?
+  rosters      Roster[]
+  mailsSent    Mail[]
   createdAt    DateTime     @default(now())
+}
+
+model Roster {
+  id           String       @id @default(uuid())
+  name         String
+  adminId      String
+  admin        Admin        @relation(fields: [adminId], references: [id], onDelete: Cascade)
+  employees    Employee[]
+  mails        Mail[]
+  createdAt    DateTime     @default(now())
+}
+
+model Employee {
+  id           String       @id @default(uuid())
+  rosterId     String
+  roster       Roster       @relation(fields: [rosterId], references: [id], onDelete: Cascade)
+  name         String
+  email        String       @unique
+  passwordHash String
+  department   String?
+  skills       String[]
+  walletAddress String?
+  status       AccountStatus @default(PENDING)
+  inviteToken  String?
   tasks        Task[]
+  createdAt    DateTime     @default(now())
 }
 
 enum TaskStatus {
@@ -62,12 +68,8 @@ enum TaskStatus {
 
 model Task {
   id             String       @id @default(uuid())
-  orgId          String
-  organization   Organization @relation(fields: [orgId], references: [id])
-  rosterId       String?
-  roster         Roster?      @relation(fields: [rosterId], references: [id])
-  assigneeId     String?
-  assignee       Employee?    @relation(fields: [assigneeId], references: [id])
+  employeeId     String
+  employee       Employee     @relation(fields: [employeeId], references: [id], onDelete: Cascade)
   title          String
   description    String
   status         TaskStatus   @default(ASSIGNED)
@@ -75,4 +77,24 @@ model Task {
   txHash         String?
   createdAt      DateTime     @default(now())
   completedAt    DateTime?
+}
+
+enum MailType {
+  INVITATION
+  CUSTOM
+}
+
+model Mail {
+  id             String       @id @default(uuid())
+  subject        String
+  body           String
+  type           MailType     @default(CUSTOM)
+  senderId       String
+  sender         Admin        @relation(fields: [senderId], references: [id], onDelete: Cascade)
+  orgId          String?
+  organization   Organization? @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  rosterId       String?
+  roster         Roster?      @relation(fields: [rosterId], references: [id], onDelete: Cascade)
+  recipientEmail String
+  createdAt      DateTime     @default(now())
 }
