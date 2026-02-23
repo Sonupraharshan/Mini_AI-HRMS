@@ -44,3 +44,4 @@ artifacts/
 
 # OS Files
 Thumbs.db
+.agent
