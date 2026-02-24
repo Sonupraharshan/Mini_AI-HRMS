@@ -12,7 +12,6 @@ const Login = () => {
   });
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
-  const [previewUrl, setPreviewUrl] = useState('');
 
   const handleChange = (e) => setFormData({ ...formData, [e.target.name]: e.target.value });
 
@@ -29,7 +28,6 @@ const Login = () => {
     if (result.success) {
       if (isRegister) {
         setSuccessMsg(result.message);
-        setPreviewUrl(result.previewUrl || '');
         setFormData({ email: '', password: '', orgName: '', name: ''});
         setIsRegister(false); // flip back to login view but show success
       } else {
@@ -48,11 +46,6 @@ const Login = () => {
         {successMsg && (
             <div className="bg-green-100 border border-green-200 p-4 rounded mb-4 flex flex-col gap-2">
                 <p className="text-green-800 text-sm">{successMsg}</p>
-                {previewUrl && (
-                    <a href={previewUrl} target="_blank" rel="noreferrer" className="bg-green-600 hover:bg-green-700 text-white text-center py-2 rounded font-semibold text-sm transition-colors shadow-sm">
-                        ✉️ Open Mock Verification Email
-                    </a>
-                )}
             </div>
         )}
         

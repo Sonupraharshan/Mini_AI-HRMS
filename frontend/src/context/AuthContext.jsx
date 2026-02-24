@@ -43,7 +43,7 @@ export const AuthProvider = ({ children }) => {
     try {
       const response = await api.post('/auth/register', { orgName, adminName, adminEmail, adminPassword });
       // The backend no longer logs them in immediately, it sends an email.
-      return { success: true, message: response.data.message, previewUrl: response.data.previewUrl };
+      return { success: true, message: response.data.message };
     } catch (error) {
       return { success: false, error: error.response?.data?.error || 'Registration failed' };
     }

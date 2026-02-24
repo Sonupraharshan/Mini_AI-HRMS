@@ -32,12 +32,7 @@ const RosterDetail = () => {
       setEmpForm({ name: '', email: '', password: '', department: '' });
       fetchRoster();
       
-      const { message, previewUrl } = res.data;
-      if (previewUrl) {
-          window.open(previewUrl, '_blank');
-      } else {
-          alert(message);
-      }
+      alert(res.data.message);
     } catch (err) {
       alert(err.response?.data?.error || 'Error creating employee');
     }
