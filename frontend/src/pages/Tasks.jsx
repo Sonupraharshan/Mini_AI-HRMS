@@ -2,7 +2,7 @@ import React, { useEffect, useState, useContext } from 'react';
 import api from '../api';
 import { AuthContext } from '../context/AuthContext';
 import { WorkforceLoggerABI } from '../abis';
-import { ethers } from 'ethers';
+import { useAccount, useWriteContract } from 'wagmi';
 
 const Tasks = () => {
   const { user } = useContext(AuthContext);
@@ -12,12 +12,25 @@ const Tasks = () => {
   const [wallet, setWallet] = useState(user?.walletAddress || null);
   const [aiRecommendation, setAiRecommendation] = useState(null);
   const [loadingAI, setLoadingAI] = useState(false);
+  const { address: wagmiAddress, isConnected } = useAccount();
+  const { writeContractAsync } = useWriteContract();
 
   useEffect(() => {
-    if (user?.walletAddress && !wallet) {
-      setWallet(user.walletAddress);
+    // Sync the wallet address from Wagmi to our state and database
+    if (isConnected && wagmiAddress && wagmiAddress !== wallet) {
+      setWallet(wagmiAddress);
+      
+      // Update database and local storage in background
+      api.put('/employees/wallet', { walletAddress: wagmiAddress }).catch(console.error);
+      if (user) {
+        user.walletAddress = wagmiAddress;
+        localStorage.setItem('user', JSON.stringify(user));
+      }
+    } else if (!isConnected && wallet) {
+      // Handle disconnect
+      setWallet(null);
     }
-  }, [user]);
+  }, [isConnected, wagmiAddress, wallet, user]);
 
   const fetchTasks = async () => {
     try {
@@ -38,44 +51,7 @@ const Tasks = () => {
     if (user?.role === 'ADMIN') fetchEmployees();
   }, [user]);
 
-  const connectWallet = async () => {
-    if (wallet) {
-      const change = window.confirm(`A wallet is already connected: ${wallet}\n\nDo you want to change it and connect a new one?`);
-      if (!change) return;
-      
-      if (window.ethereum) {
-        try {
-          // Force MetaMask to ask for explicit account selection again
-          await window.ethereum.request({
-            method: 'wallet_requestPermissions',
-            params: [{ eth_accounts: {} }]
-          });
-        } catch (err) {
-          console.error("User cancelled permission request", err);
-          return; // Stop if they hit cancel
-        }
-      }
-    }
-
-    if (window.ethereum) {
-      try {
-        const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
-        const selectedWallet = accounts[0];
-        setWallet(selectedWallet);
-        
-        // Persist to database so admins can see it on the dashboard
-        await api.put('/employees/wallet', { walletAddress: selectedWallet });
-        
-        // Update local context so it feels snappy
-        if (user) {
-          user.walletAddress = selectedWallet;
-          localStorage.setItem('user', JSON.stringify(user));
-        }
-      } catch (err) { console.error(err); alert("Failed to connect wallet or save to database"); }
-    } else {
-      alert("Please install MetaMask!");
-    }
-  };
+  // connectWallet function is no longer needed, AppKit handles it natively!
 
   const handleChange = (e) => setFormData({ ...formData, [e.target.name]: e.target.value });
 
@@ -112,29 +88,25 @@ const Tasks = () => {
   const updateStatus = async (task, status) => {
     try {
       let txHash = null;
-      if (status === 'COMPLETED' && wallet) {
-        if (!window.ethereum) {
-          alert("MetaMask is required to log completions on-chain.");
+      if (status === 'COMPLETED') {
+        if (!isConnected) {
+          alert("Please connect your wallet using the button first.");
           return;
         }
-        console.log("Submitting transaction to local Hardhat node...");
-        
-        // Ethers v6 usage
-        const provider = new ethers.BrowserProvider(window.ethereum);
-        const signer = await provider.getSigner();
+        console.log("Submitting transaction securely via Wagmi...");
         
         const contractAddress = "0x5FbDB2315678afecb367f032d93F642f64180aa3";
-        const contract = new ethers.Contract(contractAddress, WorkforceLoggerABI, signer);
-        
-        // Use a generated dummy hash for the task completion proof
         const taskHashProof = "0x" + Math.random().toString(16).slice(2) + "deadbeef";
         
-        const tx = await contract.logTaskCompletion(task.id, taskHashProof);
-        console.log("Transaction sent:", tx.hash);
-        const receipt = await tx.wait();
+        const hash = await writeContractAsync({
+          address: contractAddress,
+          abi: WorkforceLoggerABI,
+          functionName: 'logTaskCompletion',
+          args: [task.id, taskHashProof]
+        });
         
-        txHash = receipt.hash;
-        console.log("Transaction confirmed:", receipt.hash);
+        txHash = hash;
+        console.log("Transaction successfully submitted:", hash);
       }
       
       await api.put(`/tasks/${task.id}/status`, { status, txHash });
@@ -148,14 +120,7 @@ const Tasks = () => {
         <h2 className="text-3xl font-bold">Task Board</h2>
         {user?.role === 'EMPLOYEE' && (
           <div className="flex items-center gap-2">
-            <button onClick={connectWallet} className={`px-4 py-2 rounded font-bold ${wallet ? 'bg-green-500 hover:bg-green-600' : 'bg-orange-500 hover:bg-orange-600'} text-white`}>
-              {wallet ? `Connected: ${wallet.slice(0, 6)}...${wallet.slice(-4)}` : 'Connect MetaMask'}
-            </button>
-            {wallet && (
-              <button onClick={connectWallet} className="text-sm bg-gray-200 hover:bg-gray-300 text-gray-700 px-3 py-2 rounded font-semibold border">
-                Change
-              </button>
-            )}
+            <appkit-button />
           </div>
         )}
       </div>
